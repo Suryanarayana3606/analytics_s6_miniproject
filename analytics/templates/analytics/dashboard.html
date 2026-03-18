@@ -1,0 +1,156 @@
+{% extends 'analytics/base.html' %}
+{% load humanize %}
+
+{% block page_title %}Sales Dashboard{% endblock %}
+
+{% block content %}
+<form method="GET" action="{% url 'analytics:dashboard' %}" class="glass-card"
+    style="margin-bottom: 2rem; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem;">
+    <div style="display: flex; gap: 2rem; flex: 1;">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Industry:</label>
+            <select name="industry" style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.9rem; outline: none; cursor: pointer;">
+                <option value="">All Industries</option>
+                {% for ind in industries %}
+                <option value="{{ ind }}" {% if ind == selected_industry %}selected{% endif %}>{{ ind }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Region:</label>
+            <select name="region" style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.9rem; outline: none; cursor: pointer;">
+                <option value="">All Regions</option>
+                {% for reg in regions %}
+                <option value="{{ reg }}" {% if reg == selected_region %}selected{% endif %}>{{ reg }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <button type="submit" style="background: var(--accent-primary); color: #000; border: none; padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">APPLY FILTERS</button>
+</form>
+
+<div class="grid-stats">
+    <div class="glass-card">
+        <div class="stat-label">Total Revenue</div>
+        <div class="stat-value">${{ total_revenue|floatformat:0|intcomma }}</div>
+        <div style="color: #10b981; font-weight: 600; font-size: 0.85rem;">All-time across filtered view</div>
+    </div>
+    <div class="glass-card">
+        <div class="stat-label">Active Customers</div>
+        <div class="stat-value">{{ total_customers }}</div>
+        <div style="color: var(--text-secondary); font-weight: 600; font-size: 0.85rem;">Unique buyers in current filter</div>
+    </div>
+    <div class="glass-card">
+        <div class="stat-label">Products Active</div>
+        <div class="stat-value">{{ total_products }}</div>
+        <div style="color: var(--text-secondary); font-weight: 600; font-size: 0.85rem;">Total catalogue</div>
+    </div>
+</div>
+
+<div class="grid-charts">
+    <div class="glass-card">
+        <h3 style="margin-bottom: 1.5rem; color: var(--text-primary);">Revenue by Industry</h3>
+        <div class="chart-container">
+            <canvas id="revenueChart"></canvas>
+        </div>
+    </div>
+
+    <div class="glass-card">
+        <h3 style="margin-bottom: 1.5rem; color: var(--text-primary);">Revenue by Region</h3>
+        <div class="chart-container">
+            <canvas id="regionChart"></canvas>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const industryLabels = {{ chart_labels|safe }};
+    const industryData   = {{ chart_data|safe }};
+    const regionLabels   = {{ region_labels|safe }};
+    const regionData     = {{ region_data|safe }};
+
+    // ── Industry bar chart ────────────────────────────────────────────────
+    const industryCtx = document.getElementById('revenueChart').getContext('2d');
+    const gradient = industryCtx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.8)');
+    gradient.addColorStop(1, 'rgba(59, 130, 246, 0.1)');
+
+    new Chart(industryCtx, {
+        type: 'bar',
+        data: {
+            labels: industryLabels,
+            datasets: [{
+                label: 'Revenue ($)',
+                data: industryData,
+                backgroundColor: gradient,
+                borderColor: 'rgba(59, 130, 246, 1)',
+                borderWidth: 1,
+                borderRadius: 6,
+                hoverBackgroundColor: 'rgba(139, 92, 246, 0.8)'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: {
+                        callback: v => '$' + new Intl.NumberFormat('en-US', {notation:'compact'}).format(v)
+                    }
+                },
+                x: { grid: { display: false } }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => '$' + new Intl.NumberFormat('en-US').format(ctx.parsed.y)
+                    }
+                }
+            }
+        }
+    });
+
+    // ── Region doughnut chart ────────────────────────────────────────────
+    const regionCtx = document.getElementById('regionChart').getContext('2d');
+    const regionColors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b'];
+
+    new Chart(regionCtx, {
+        type: 'doughnut',
+        data: {
+            labels: regionLabels,
+            datasets: [{
+                data: regionData,
+                backgroundColor: regionColors.map(c => c + 'CC'),
+                borderColor: '#0f172a',
+                borderWidth: 2,
+                hoverOffset: 10
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '65%',
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#94a3b8',
+                        padding: 16,
+                        font: { family: "'Inter', sans-serif", size: 13 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ' $' + new Intl.NumberFormat('en-US').format(ctx.parsed)
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

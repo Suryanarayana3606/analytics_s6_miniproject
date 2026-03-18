@@ -1,0 +1,1545 @@
+v1
+
+{% extends 'analytics/base.html' %}
+{% load humanize %}
+
+{% block page_title %}Sales Forecast{% endblock %}
+
+{% block content %}
+<form method="GET" action="{% url 'analytics:sales_forecast' %}" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1rem; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+        Forecast Parameters</h3>
+    <div class="glass-card"
+        style="padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem;">
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Model:</label>
+            <select name="model"
+                style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Horizon (Months):</label>
+            <select name="horizon" onchange="this.form.submit()" style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                <option value="6"  {% if horizon == '6'  %}selected{% endif %}>6</option>
+                <option value="12" {% if horizon == '12' or not horizon %}selected{% endif %}>12</option>
+                <option value="24" {% if horizon == '24' %}selected{% endif %}>24</option>
+            </select>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit"
+                style="background: var(--accent-primary); color: #000; border: none; padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">GENERATE
+                FORECAST</button>
+            <a href="{% url 'analytics:export_forecast' %}"
+                style="background: rgba(148, 163, 184, 0.2); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                EXPORT CSV
+            </a>
+        </div>
+    </div>
+</form>
+
+<!-- Metric Cards -->
+<div class="metrics-grid"
+    style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.5rem; margin-bottom: 2rem;">
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAPE
+            <span title="Mean Absolute Percentage Error — lower is better" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ mape }}%</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAE
+            <span title="Mean Absolute Error — average magnitude of forecast errors" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ mae|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            RMSE
+            <span title="Root Mean Squared Error — penalises large errors more heavily" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ rmse|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            R²
+            <span title="Coefficient of Determination — 1.0 = perfect fit, measured on held-out test set" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ r2 }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            Avg Forecast
+            <span title="Average Forecasted Monthly Revenue" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ avg_forecast_revenue|floatformat:0|intcomma }}</p>
+    </div>
+</div>
+
+<!-- Disclaimer -->
+<div style="margin-bottom: 2rem; padding: 1rem; border-left: 4px solid var(--accent-primary); background: rgba(59, 130, 246, 0.1); border-radius: 4px;">
+    <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        <strong style="color: var(--text-primary);">Model Disclaimer:</strong>
+        All metrics (MAPE, MAE, RMSE, R²) are computed on a chronologically held-out test set (last 20 % of data).
+        Confidence intervals are 95 % prediction bands derived from each model's residual standard deviation.
+        Models are sklearn proxies: XGBoost → GradientBoosting, Prophet → RandomForest, ARIMA → Ridge, LSTM → GradientBoosting.
+    </p>
+</div>
+
+<!-- Model Comparison + Drivers + Top Products -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+
+    <!-- Model Comparison Panel -->
+    <div class="glass-card">
+        <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+            Model Comparison
+            <span style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">Best Model: {{ best_model }}</span>
+        </h3>
+        <table class="premium-table" style="margin-top: 0;">
+            <thead>
+                <tr>
+                    <th>Model Name</th>
+                    <th>MAPE</th>
+                    <th>RMSE</th>
+                    <th>R²</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for metric in model_metrics %}
+                <tr {% if metric.name == selected_model %}style="background: rgba(59, 130, 246, 0.1);"{% endif %}>
+                    <td>{{ metric.name }}</td>
+                    <td>{{ metric.mape }}%</td>
+                    <td>${{ metric.rmse|floatformat:0|intcomma }}</td>
+                    <td>{{ metric.r2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 2rem;">
+
+        <!-- Feature Importance Panel — real values from the model -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Revenue Drivers
+            </h3>
+            {% if feature_importances %}
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                {% for label, pct in feature_importances %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">{{ label }}</span>
+                        <span style="font-size: 0.85rem; color: var(--accent-primary);">{{ pct }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ pct }}%; height: 100%; background: var(--accent-primary);"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; opacity: 0.5;">
+                <p style="font-size: 0.85rem; text-align: center;">
+                    Feature importance data is not available for this model yet.<br>
+                    Run <code>python manage.py train_sales_model</code> to generate it.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Top Future Products Panel -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Future Products
+            </h3>
+            <table class="premium-table" style="margin-top: 0;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px;">Product</th>
+                        <th style="text-align: right; padding: 8px;">Forecast ({{ horizon|default:"12" }}m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tp in top_products %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 8px; font-size: 0.9rem;">{{ tp.product__product_name }}</td>
+                        <td style="text-align: right; padding: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.9rem;">${{ tp.total_forecast|floatformat:0|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" style="text-align: center; color: var(--text-secondary);">No forecast data available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Forecast Chart -->
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">Forecast
+        Results</h3>
+    <div class="chart-container" style="height: 400px;">
+        <canvas id="forecastChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const dates             = {{ forecast_dates|safe }};
+    const historicalRevenues = {{ historical_revenues|safe }};
+    const revenues          = {{ forecast_revenues|safe }};
+    const lowerBounds       = {{ lower_bounds|safe }};
+    const upperBounds       = {{ upper_bounds|safe }};
+
+    const ctx = document.getElementById('forecastChart').getContext('2d');
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: [
+                {
+                    label: 'Historical Revenue',
+                    data: historicalRevenues,
+                    borderColor: '#9ca3af',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#9ca3af',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Predicted Revenue',
+                    data: revenues,
+                    borderColor: '#06b6d4',
+                    borderWidth: 3,
+                    borderDash: [5, 5],
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#06b6d4',
+                    pointBorderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5
+                },
+                {
+                    label: 'Upper Bound (95% CI)',
+                    data: upperBounds,
+                    borderColor: '#ef4444',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#ef4444',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Lower Bound (95% CI)',
+                    data: lowerBounds,
+                    borderColor: '#eab308',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#eab308',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + new Intl.NumberFormat('en-US').format(value);
+                        }
+                    }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, minRotation: 45, maxTicksLimit: 15 }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#94a3b8' } },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += new Intl.NumberFormat('en-US', {
+                                    style: 'currency', currency: 'USD'
+                                }).format(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}
+
+-->
+
+
+--------------------------------------------------
+v2
+
+{% extends 'analytics/base.html' %}
+{% load humanize %}
+
+{% block page_title %}Sales Forecast{% endblock %}
+
+{% block content %}
+<form method="GET" action="{% url 'analytics:sales_forecast' %}" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1rem; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+        Forecast Parameters</h3>
+    <div class="glass-card"
+        style="padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem;">
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Model:</label>
+            <select name="model"
+                style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Horizon (Months):</label>
+            <select name="horizon" onchange="this.form.submit()" style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                <option value="6"  {% if horizon == '6'  %}selected{% endif %}>6</option>
+                <option value="12" {% if horizon == '12' or not horizon %}selected{% endif %}>12</option>
+                <option value="24" {% if horizon == '24' %}selected{% endif %}>24</option>
+            </select>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit"
+                style="background: var(--accent-primary); color: #000; border: none; padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">GENERATE
+                FORECAST</button>
+            <a href="{% url 'analytics:export_forecast' %}"
+                style="background: rgba(148, 163, 184, 0.2); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                EXPORT CSV
+            </a>
+        </div>
+    </div>
+</form>
+
+<!-- Metric Cards -->
+<div class="metrics-grid"
+    style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.5rem; margin-bottom: 2rem;">
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAPE
+            <span title="Mean Absolute Percentage Error — lower is better" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ mape }}%</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAE
+            <span title="Mean Absolute Error — average magnitude of forecast errors" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ mae|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            RMSE
+            <span title="Root Mean Squared Error — penalises large errors more heavily" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ rmse|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            R²
+            <span title="Coefficient of Determination — 1.0 = perfect fit, measured on held-out test set" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ r2 }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            Avg Forecast
+            <span title="Average Forecasted Monthly Revenue" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ avg_forecast_revenue|floatformat:0|intcomma }}</p>
+    </div>
+</div>
+
+<!-- Disclaimer -->
+<div style="margin-bottom: 2rem; padding: 1rem; border-left: 4px solid var(--accent-primary); background: rgba(59, 130, 246, 0.1); border-radius: 4px;">
+    <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        <strong style="color: var(--text-primary);">Model Disclaimer:</strong>
+        All metrics (MAPE, MAE, RMSE, R²) are computed on a chronologically held-out test set (last 20 % of data).
+        Confidence intervals are 95 % prediction bands derived from each model's residual standard deviation.
+        Models are sklearn proxies: XGBoost → GradientBoosting, Prophet → RandomForest, ARIMA → Ridge, LSTM → GradientBoosting.
+    </p>
+</div>
+
+<!-- Model Comparison + Drivers + Top Products -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+
+    <!-- Model Comparison Panel -->
+    <div class="glass-card">
+        <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+            Model Comparison
+            <span style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">Best Model: {{ best_model }}</span>
+        </h3>
+        <table class="premium-table" style="margin-top: 0;">
+            <thead>
+                <tr>
+                    <th>Model Name</th>
+                    <th>MAPE</th>
+                    <th>RMSE</th>
+                    <th>R²</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for metric in model_metrics %}
+                <tr {% if metric.name == selected_model %}style="background: rgba(59, 130, 246, 0.1);"{% endif %}>
+                    <td>{{ metric.name }}</td>
+                    <td>{{ metric.mape }}%</td>
+                    <td>${{ metric.rmse|floatformat:0|intcomma }}</td>
+                    <td>{{ metric.r2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 2rem;">
+
+        <!-- Feature Importance Panel — real values from the model -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Revenue Drivers
+            </h3>
+            {% if feature_importances %}
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                {% for label, pct in feature_importances %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">{{ label }}</span>
+                        <span style="font-size: 0.85rem; color: var(--accent-primary);">{{ pct }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ pct }}%; height: 100%; background: var(--accent-primary);"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; opacity: 0.5;">
+                <p style="font-size: 0.85rem; text-align: center;">
+                    Feature importance data is not available for this model yet.<br>
+                    Run <code>python manage.py train_sales_model</code> to generate it.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Top Future Products Panel -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Future Products
+            </h3>
+            <table class="premium-table" style="margin-top: 0;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px;">Product</th>
+                        <th style="text-align: right; padding: 8px;">Forecast ({{ horizon|default:"12" }}m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tp in top_products %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 8px; font-size: 0.9rem;">{{ tp.product__product_name }}</td>
+                        <td style="text-align: right; padding: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.9rem;">${{ tp.total_forecast|floatformat:0|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" style="text-align: center; color: var(--text-secondary);">No forecast data available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+
+<!-- Real-Time Prediction Panel -->
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+        Real-Time Prediction
+        <span style="background: rgba(16,185,129,0.2); color: #10b981; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">
+            <span id="rt-status-dot" style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+            <span id="rt-status-label">Live</span>
+        </span>
+    </h3>
+    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.5rem;">
+        Adjust the inputs below — the chart updates instantly by calling <code style="background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:3px;">model.predict()</code> directly. No database read.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 1.5rem;">
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Product
+            </label>
+            <select id="rt-product" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                {% for product in products %}
+                <option value="{{ product.product_id }}" data-price="{{ product.base_price }}">{{ product.product_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Base Price ($)
+            </label>
+            <input id="rt-price" type="number" min="1" step="50" value="1200"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Model
+            </label>
+            <select id="rt-model" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Last Month Revenue ($) <span title="lag_1 — most recent actual revenue" style="cursor:help;opacity:0.6;">ⓘ</span>
+            </label>
+            <input id="rt-lag1" type="number" min="0" step="500" value="15000"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                2 Months Ago ($) <span title="lag_2 — revenue two months prior" style="cursor:help;opacity:0.6;">ⓘ</span>
+            </label>
+            <input id="rt-lag2" type="number" min="0" step="500" value="14200"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Horizon (months)
+            </label>
+            <select id="rt-horizon" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                <option value="6">6</option>
+                <option value="12" selected>12</option>
+                <option value="24">24</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Live result cards -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem;">
+        <div style="background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Next Month Forecast</div>
+            <div id="rt-next-month" style="font-size:1.6rem;font-weight:700;color:#06b6d4;">—</div>
+        </div>
+        <div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">95% CI Range</div>
+            <div id="rt-ci-range" style="font-size:1.1rem;font-weight:600;color:#8b5cf6;">—</div>
+        </div>
+        <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Horizon Revenue</div>
+            <div id="rt-total" style="font-size:1.6rem;font-weight:700;color:#10b981;">—</div>
+        </div>
+    </div>
+
+    <!-- Real-time chart -->
+    <div class="chart-container" style="height:300px;">
+        <canvas id="rtChart"></canvas>
+    </div>
+
+    <div id="rt-error" style="display:none;margin-top:1rem;padding:0.75rem 1rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#ef4444;font-size:0.85rem;"></div>
+</div>
+
+<!-- Forecast Chart -->
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">Forecast
+        Results</h3>
+    <div class="chart-container" style="height: 400px;">
+        <canvas id="forecastChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const dates             = {{ forecast_dates|safe }};
+    const historicalRevenues = {{ historical_revenues|safe }};
+    const revenues          = {{ forecast_revenues|safe }};
+    const lowerBounds       = {{ lower_bounds|safe }};
+    const upperBounds       = {{ upper_bounds|safe }};
+
+    const ctx = document.getElementById('forecastChart').getContext('2d');
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: [
+                {
+                    label: 'Historical Revenue',
+                    data: historicalRevenues,
+                    borderColor: '#9ca3af',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#9ca3af',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Predicted Revenue',
+                    data: revenues,
+                    borderColor: '#06b6d4',
+                    borderWidth: 3,
+                    borderDash: [5, 5],
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#06b6d4',
+                    pointBorderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5
+                },
+                {
+                    label: 'Upper Bound (95% CI)',
+                    data: upperBounds,
+                    borderColor: '#ef4444',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#ef4444',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Lower Bound (95% CI)',
+                    data: lowerBounds,
+                    borderColor: '#eab308',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#eab308',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + new Intl.NumberFormat('en-US').format(value);
+                        }
+                    }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, minRotation: 45, maxTicksLimit: 15 }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#94a3b8' } },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += new Intl.NumberFormat('en-US', {
+                                    style: 'currency', currency: 'USD'
+                                }).format(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // =========================================================
+    // Real-Time Prediction Panel
+    // =========================================================
+    (function () {
+        // Read CSRF token from cookie — reliable for AJAX, works even from cached pages
+        function getCookie(name) {
+            const value = '; ' + document.cookie;
+            const parts = value.split('; ' + name + '=');
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        const csrfToken = getCookie('csrftoken');
+        const apiUrl    = '{% url "analytics:api_realtime_predict" %}';
+
+        let rtChart = null;
+        let debounceTimer = null;
+
+        // Auto-populate base price when product changes
+        document.getElementById('rt-product').addEventListener('change', function () {
+            const opt   = this.options[this.selectedIndex];
+            const price = opt.getAttribute('data-price');
+            if (price) document.getElementById('rt-price').value = parseFloat(price);
+            schedulePredict();
+        });
+
+        // Debounce all inputs — run prediction 400ms after user stops typing
+        ['rt-price', 'rt-lag1', 'rt-lag2'].forEach(id => {
+            document.getElementById(id).addEventListener('input', schedulePredict);
+        });
+        ['rt-model', 'rt-horizon'].forEach(id => {
+            document.getElementById(id).addEventListener('change', schedulePredict);
+        });
+
+        function schedulePredict() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(runPredict, 400);
+        }
+
+        function fmt(n) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+        }
+
+        function setStatus(ok) {
+            const dot   = document.getElementById('rt-status-dot');
+            const label = document.getElementById('rt-status-label');
+            if (ok === 'loading') {
+                dot.style.background   = '#f59e0b';
+                label.textContent      = 'Running...';
+            } else if (ok === true) {
+                dot.style.background   = '#10b981';
+                label.textContent      = 'Live';
+            } else {
+                dot.style.background   = '#ef4444';
+                label.textContent      = 'Error';
+            }
+        }
+
+        async function runPredict() {
+            setStatus('loading');
+            document.getElementById('rt-error').style.display = 'none';
+
+            const now   = new Date();
+            const year  = now.getFullYear();
+            const month = now.getMonth() + 2; // next month
+
+            const payload = {
+                model:          document.getElementById('rt-model').value,
+                product_id:     parseInt(document.getElementById('rt-product').value),
+                base_price:     parseFloat(document.getElementById('rt-price').value)   || 0,
+                lag_1_revenue:  parseFloat(document.getElementById('rt-lag1').value)    || 0,
+                lag_2_revenue:  parseFloat(document.getElementById('rt-lag2').value)    || 0,
+                start_year:     month > 12 ? year + 1 : year,
+                start_month:    month > 12 ? 1 : month,
+                horizon_months: parseInt(document.getElementById('rt-horizon').value)   || 12,
+            };
+
+            try {
+                const resp = await fetch(apiUrl, {
+                    method:  'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken':  csrfToken,
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                const json = await resp.json();
+
+                if (json.status !== 'success') {
+                    throw new Error(json.message || 'Prediction failed');
+                }
+
+                updateUI(json.data, json.meta);
+                setStatus(true);
+
+            } catch (err) {
+                setStatus(false);
+                const errEl = document.getElementById('rt-error');
+                errEl.style.display = 'block';
+                errEl.textContent   = 'Prediction error: ' + err.message;
+            }
+        }
+
+        function updateUI(data, meta) {
+            if (!data || data.length === 0) return;
+
+            const first = data[0];
+            const total = data.reduce((s, d) => s + d.predicted, 0);
+
+            document.getElementById('rt-next-month').textContent = fmt(first.predicted);
+            document.getElementById('rt-total').textContent      = fmt(total);
+            document.getElementById('rt-ci-range').textContent   =
+                fmt(first.lower_bound) + ' – ' + fmt(first.upper_bound);
+
+            const labels = data.map(d => d.month);
+            const preds  = data.map(d => d.predicted);
+            const lowers = data.map(d => d.lower_bound);
+            const uppers = data.map(d => d.upper_bound);
+
+            if (!rtChart) {
+                const ctx = document.getElementById('rtChart').getContext('2d');
+                rtChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Predicted Revenue',
+                                data: preds,
+                                borderColor: '#06b6d4',
+                                borderWidth: 2.5,
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                                pointBackgroundColor: '#0f172a',
+                                pointBorderColor: '#06b6d4',
+                            },
+                            {
+                                label: 'Upper 95% CI',
+                                data: uppers,
+                                borderColor: '#ef4444',
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 0,
+                            },
+                            {
+                                label: 'Lower 95% CI',
+                                data: lowers,
+                                borderColor: '#eab308',
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 0,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 300 },
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            y: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: {
+                                    callback: v => '$' + new Intl.NumberFormat('en-US', { notation: 'compact' }).format(v)
+                                }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { maxRotation: 45, minRotation: 45 }
+                            },
+                        },
+                        plugins: {
+                            legend: { labels: { color: '#94a3b8' } },
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => ctx.dataset.label + ': ' +
+                                        new Intl.NumberFormat('en-US', {
+                                            style: 'currency', currency: 'USD'
+                                        }).format(ctx.parsed.y)
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                // Update existing chart data in-place (smooth transition)
+                rtChart.data.labels              = labels;
+                rtChart.data.datasets[0].data    = preds;
+                rtChart.data.datasets[1].data    = uppers;
+                rtChart.data.datasets[2].data    = lowers;
+                rtChart.update('active');
+            }
+        }
+
+        // Trigger initial prediction on page load
+        runPredict();
+    })();
+</script>
+{% endblock %}
+
+v3
+{% extends 'analytics/base.html' %}
+{% load humanize %}
+
+{% block page_title %}Sales Forecast{% endblock %}
+
+{% block content %}
+<form method="GET" action="{% url 'analytics:sales_forecast' %}" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1rem; color: var(--text-primary); text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+        Forecast Parameters</h3>
+    <div class="glass-card"
+        style="padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 2rem;">
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Model:</label>
+            <select name="model"
+                style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="color: var(--text-secondary); font-weight: 600; font-size: 0.9rem;">Horizon (Months):</label>
+            <select name="horizon" onchange="this.form.submit()" style="background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 4px; font-size: 1rem; outline: none; cursor: pointer;">
+                <option value="6"  {% if horizon == '6'  %}selected{% endif %}>6</option>
+                <option value="12" {% if horizon == '12' or not horizon %}selected{% endif %}>12</option>
+                <option value="24" {% if horizon == '24' %}selected{% endif %}>24</option>
+            </select>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit"
+                style="background: var(--accent-primary); color: #000; border: none; padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;">GENERATE
+                FORECAST</button>
+            <a href="{% url 'analytics:export_forecast' %}"
+                style="background: rgba(148, 163, 184, 0.2); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 0.6rem 1.5rem; border-radius: 4px; font-weight: 600; cursor: pointer; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; transition: background 0.2s;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                EXPORT CSV
+            </a>
+        </div>
+    </div>
+</form>
+
+<!-- Metric Cards -->
+<div class="metrics-grid"
+    style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.5rem; margin-bottom: 2rem;">
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAPE
+            <span title="Mean Absolute Percentage Error — lower is better" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ mape }}%</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            MAE
+            <span title="Mean Absolute Error — average magnitude of forecast errors" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ mae|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            RMSE
+            <span title="Root Mean Squared Error — penalises large errors more heavily" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ rmse|floatformat:0|intcomma }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            R²
+            <span title="Coefficient of Determination — 1.0 = perfect fit, measured on held-out test set" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">{{ r2 }}</p>
+    </div>
+    <div class="glass-card metric-card">
+        <h3 class="metric-title" style="text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+            Avg Forecast
+            <span title="Average Forecasted Monthly Revenue" style="cursor: help; color: var(--text-secondary); font-size: 0.8rem;">ⓘ</span>
+        </h3>
+        <p class="metric-value">${{ avg_forecast_revenue|floatformat:0|intcomma }}</p>
+    </div>
+</div>
+
+<!-- Disclaimer -->
+<div style="margin-bottom: 2rem; padding: 1rem; border-left: 4px solid var(--accent-primary); background: rgba(59, 130, 246, 0.1); border-radius: 4px;">
+    <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        <strong style="color: var(--text-primary);">Model Disclaimer:</strong>
+        All metrics (MAPE, MAE, RMSE, R²) are computed on a chronologically held-out test set (last 20 % of data).
+        Confidence intervals are 95 % prediction bands derived from each model's residual standard deviation.
+        Models are sklearn proxies: XGBoost → GradientBoosting, Prophet → RandomForest, ARIMA → Ridge, LSTM → GradientBoosting.
+    </p>
+</div>
+
+<!-- Model Comparison + Drivers + Top Products -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+
+    <!-- Model Comparison Panel -->
+    <div class="glass-card">
+        <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+            Model Comparison
+            <span style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">Best Model: {{ best_model }}</span>
+        </h3>
+        <table class="premium-table" style="margin-top: 0;">
+            <thead>
+                <tr>
+                    <th>Model Name</th>
+                    <th>MAPE</th>
+                    <th>RMSE</th>
+                    <th>R²</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for metric in model_metrics %}
+                <tr {% if metric.name == selected_model %}style="background: rgba(59, 130, 246, 0.1);"{% endif %}>
+                    <td>{{ metric.name }}</td>
+                    <td>{{ metric.mape }}%</td>
+                    <td>${{ metric.rmse|floatformat:0|intcomma }}</td>
+                    <td>{{ metric.r2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 2rem;">
+
+        <!-- Feature Importance Panel — real values from the model -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Revenue Drivers
+            </h3>
+            {% if feature_importances %}
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                {% for label, pct in feature_importances %}
+                <div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">{{ label }}</span>
+                        <span style="font-size: 0.85rem; color: var(--accent-primary);">{{ pct }}%</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {{ pct }}%; height: 100%; background: var(--accent-primary);"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; opacity: 0.5;">
+                <p style="font-size: 0.85rem; text-align: center;">
+                    Feature importance data is not available for this model yet.<br>
+                    Run <code>python manage.py train_sales_model</code> to generate it.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Top Future Products Panel -->
+        <div class="glass-card">
+            <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">
+                Top Future Products
+            </h3>
+            <table class="premium-table" style="margin-top: 0;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px;">Product</th>
+                        <th style="text-align: right; padding: 8px;">Forecast ({{ horizon|default:"12" }}m)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tp in top_products %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 8px; font-size: 0.9rem;">{{ tp.product__product_name }}</td>
+                        <td style="text-align: right; padding: 8px; color: var(--accent-primary); font-weight: 600; font-size: 0.9rem;">${{ tp.total_forecast|floatformat:0|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" style="text-align: center; color: var(--text-secondary);">No forecast data available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+
+<!-- Real-Time Prediction Panel -->
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+        Real-Time Prediction
+        <span style="background: rgba(16,185,129,0.2); color: #10b981; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">
+            <span id="rt-status-dot" style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+            <span id="rt-status-label">Live</span>
+        </span>
+    </h3>
+    <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.5rem;">
+        Adjust the inputs below — the chart updates instantly by calling <code style="background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:3px;">model.predict()</code> directly. No database read.
+    </p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 1.5rem;">
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Product
+            </label>
+            <select id="rt-product" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                {% for product in products %}
+                <option value="{{ product.product_id }}" data-price="{{ product.base_price }}">{{ product.product_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Base Price ($)
+            </label>
+            <input id="rt-price" type="number" min="1" step="50" value="1200"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Model
+            </label>
+            <select id="rt-model" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                {% for m in models %}
+                <option value="{{ m }}" {% if m == selected_model %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Last Month Revenue ($) <span title="lag_1 — most recent actual revenue" style="cursor:help;opacity:0.6;">ⓘ</span>
+            </label>
+            <input id="rt-lag1" type="number" min="0" step="500" value="15000"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                2 Months Ago ($) <span title="lag_2 — revenue two months prior" style="cursor:help;opacity:0.6;">ⓘ</span>
+            </label>
+            <input id="rt-lag2" type="number" min="0" step="500" value="14200"
+                style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;">
+        </div>
+
+        <div>
+            <label style="display:block;color:var(--text-secondary);font-size:0.8rem;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
+                Horizon (months)
+            </label>
+            <select id="rt-horizon" style="width:100%;background:rgba(15,23,42,0.6);color:white;border:1px solid rgba(255,255,255,0.15);padding:0.55rem 0.8rem;border-radius:6px;font-size:0.9rem;outline:none;cursor:pointer;">
+                <option value="6">6</option>
+                <option value="12" selected>12</option>
+                <option value="24">24</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Live result cards -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem;">
+        <div style="background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Next Month Forecast</div>
+            <div id="rt-next-month" style="font-size:1.6rem;font-weight:700;color:#06b6d4;">—</div>
+        </div>
+        <div style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">95% CI Range</div>
+            <div id="rt-ci-range" style="font-size:1.1rem;font-weight:600;color:#8b5cf6;">—</div>
+        </div>
+        <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;padding:1rem;text-align:center;">
+            <div style="color:var(--text-secondary);font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total Horizon Revenue</div>
+            <div id="rt-total" style="font-size:1.6rem;font-weight:700;color:#10b981;">—</div>
+        </div>
+    </div>
+
+    <!-- Real-time chart -->
+    <div class="chart-container" style="height:300px;">
+        <canvas id="rtChart"></canvas>
+    </div>
+
+    <div id="rt-error" style="display:none;margin-top:1rem;padding:0.75rem 1rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#ef4444;font-size:0.85rem;"></div>
+</div>
+
+<!-- Forecast Chart -->
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; font-size: 0.9rem;">Forecast
+        Results</h3>
+    <div class="chart-container" style="height: 400px;">
+        <canvas id="forecastChart"></canvas>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const dates             = {{ forecast_dates|safe }};
+    const historicalRevenues = {{ historical_revenues|safe }};
+    const revenues          = {{ forecast_revenues|safe }};
+    const lowerBounds       = {{ lower_bounds|safe }};
+    const upperBounds       = {{ upper_bounds|safe }};
+
+    const ctx = document.getElementById('forecastChart').getContext('2d');
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: [
+                {
+                    label: 'Historical Revenue',
+                    data: historicalRevenues,
+                    borderColor: '#9ca3af',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#9ca3af',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Predicted Revenue',
+                    data: revenues,
+                    borderColor: '#06b6d4',
+                    borderWidth: 3,
+                    borderDash: [5, 5],
+                    tension: 0.4,
+                    fill: false,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#06b6d4',
+                    pointBorderWidth: 2,
+                    pointRadius: 3,
+                    pointHoverRadius: 5
+                },
+                {
+                    label: 'Upper Bound (95% CI)',
+                    data: upperBounds,
+                    borderColor: '#ef4444',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#ef4444',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: 'Lower Bound (95% CI)',
+                    data: lowerBounds,
+                    borderColor: '#eab308',
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#0f172a',
+                    pointBorderColor: '#eab308',
+                    pointBorderWidth: 1,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: {
+                        callback: function(value) {
+                            return '$' + new Intl.NumberFormat('en-US').format(value);
+                        }
+                    }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, minRotation: 45, maxTicksLimit: 15 }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#94a3b8' } },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (context.parsed.y !== null) {
+                                label += new Intl.NumberFormat('en-US', {
+                                    style: 'currency', currency: 'USD'
+                                }).format(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // =========================================================
+    // Real-Time Prediction Panel
+    // =========================================================
+    (function () {
+        // Read CSRF token from cookie — reliable for AJAX, works even from cached pages
+        function getCookie(name) {
+            const value = '; ' + document.cookie;
+            const parts = value.split('; ' + name + '=');
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }
+        const csrfToken = getCookie('csrftoken');
+        const apiUrl    = '{% url "analytics:api_realtime_predict" %}';
+
+        let rtChart = null;
+        let debounceTimer = null;
+
+        // Auto-populate base price when product changes
+        document.getElementById('rt-product').addEventListener('change', function () {
+            const opt   = this.options[this.selectedIndex];
+            const price = opt.getAttribute('data-price');
+            if (price) document.getElementById('rt-price').value = parseFloat(price);
+            schedulePredict();
+        });
+
+        // Debounce all inputs — run prediction 400ms after user stops typing
+        ['rt-price', 'rt-lag1', 'rt-lag2'].forEach(id => {
+            document.getElementById(id).addEventListener('input', schedulePredict);
+        });
+        ['rt-model', 'rt-horizon'].forEach(id => {
+            document.getElementById(id).addEventListener('change', schedulePredict);
+        });
+
+        function schedulePredict() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(runPredict, 400);
+        }
+
+        function fmt(n) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+        }
+
+        function setStatus(ok) {
+            const dot   = document.getElementById('rt-status-dot');
+            const label = document.getElementById('rt-status-label');
+            if (ok === 'loading') {
+                dot.style.background   = '#f59e0b';
+                label.textContent      = 'Running...';
+            } else if (ok === true) {
+                dot.style.background   = '#10b981';
+                label.textContent      = 'Live';
+            } else {
+                dot.style.background   = '#ef4444';
+                label.textContent      = 'Error';
+            }
+        }
+
+        async function runPredict() {
+            setStatus('loading');
+            document.getElementById('rt-error').style.display = 'none';
+
+            const now   = new Date();
+            const year  = now.getFullYear();
+            const month = now.getMonth() + 2; // next month
+
+            const payload = {
+                model:          document.getElementById('rt-model').value,
+                product_id:     parseInt(document.getElementById('rt-product').value),
+                base_price:     parseFloat(document.getElementById('rt-price').value)   || 0,
+                lag_1_revenue:  parseFloat(document.getElementById('rt-lag1').value)    || 0,
+                lag_2_revenue:  parseFloat(document.getElementById('rt-lag2').value)    || 0,
+                start_year:     month > 12 ? year + 1 : year,
+                start_month:    month > 12 ? 1 : month,
+                horizon_months: parseInt(document.getElementById('rt-horizon').value)   || 12,
+            };
+
+            try {
+                const resp = await fetch(apiUrl, {
+                    method:  'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken':  csrfToken,
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                const json = await resp.json();
+
+                if (json.status !== 'success') {
+                    throw new Error(json.message || 'Prediction failed');
+                }
+
+                updateUI(json.data, json.meta);
+                setStatus(true);
+
+            } catch (err) {
+                setStatus(false);
+                const errEl = document.getElementById('rt-error');
+                errEl.style.display = 'block';
+                errEl.textContent   = 'Prediction error: ' + err.message;
+            }
+        }
+
+        function updateUI(data, meta) {
+            if (!data || data.length === 0) return;
+
+            const first = data[0];
+            const total = data.reduce((s, d) => s + d.predicted, 0);
+
+            document.getElementById('rt-next-month').textContent = fmt(first.predicted);
+            document.getElementById('rt-total').textContent      = fmt(total);
+            document.getElementById('rt-ci-range').textContent   =
+                fmt(first.lower_bound) + ' – ' + fmt(first.upper_bound);
+
+            const labels = data.map(d => d.month);
+            const preds  = data.map(d => d.predicted);
+            const lowers = data.map(d => d.lower_bound);
+            const uppers = data.map(d => d.upper_bound);
+
+            if (!rtChart) {
+                const ctx = document.getElementById('rtChart').getContext('2d');
+                rtChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Predicted Revenue',
+                                data: preds,
+                                borderColor: '#06b6d4',
+                                borderWidth: 2.5,
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 3,
+                                pointHoverRadius: 5,
+                                pointBackgroundColor: '#0f172a',
+                                pointBorderColor: '#06b6d4',
+                            },
+                            {
+                                label: 'Upper 95% CI',
+                                data: uppers,
+                                borderColor: '#ef4444',
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 0,
+                            },
+                            {
+                                label: 'Lower 95% CI',
+                                data: lowers,
+                                borderColor: '#eab308',
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
+                                tension: 0.4,
+                                fill: false,
+                                pointRadius: 0,
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 300 },
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            y: {
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: {
+                                    callback: v => '$' + new Intl.NumberFormat('en-US', { notation: 'compact' }).format(v)
+                                }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { maxRotation: 45, minRotation: 45 }
+                            },
+                        },
+                        plugins: {
+                            legend: { labels: { color: '#94a3b8' } },
+                            tooltip: {
+                                callbacks: {
+                                    label: ctx => ctx.dataset.label + ': ' +
+                                        new Intl.NumberFormat('en-US', {
+                                            style: 'currency', currency: 'USD'
+                                        }).format(ctx.parsed.y)
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                // Update existing chart data in-place (smooth transition)
+                rtChart.data.labels              = labels;
+                rtChart.data.datasets[0].data    = preds;
+                rtChart.data.datasets[1].data    = uppers;
+                rtChart.data.datasets[2].data    = lowers;
+                rtChart.update('active');
+            }
+        }
+
+        // Trigger initial prediction on page load
+        runPredict();
+    })();
+</script>
+{% endblock %}
