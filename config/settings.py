@@ -19,9 +19,14 @@ SECRET_KEY = os.environ.get(
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
-# Accept comma OR space separated hosts, plus always allow localhost in dev
-_raw_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost 127.0.0.1')
-ALLOWED_HOSTS = [h.strip() for h in _raw_hosts.replace(',', ' ').split() if h.strip()]
+# ALLOWED_HOSTS — works for local dev and Render deployment
+# Render automatically sets IS_RENDER env var, we use that to allow all Render domains
+if os.environ.get('RENDER'):
+    # On Render: allow the specific domain + wildcard for onrender.com
+    ALLOWED_HOSTS = ['*']
+else:
+    _raw_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost 127.0.0.1')
+    ALLOWED_HOSTS = [h.strip() for h in _raw_hosts.replace(',', ' ').split() if h.strip()]
 
 # ---------------------------------------------------------------------------
 # Application definition
